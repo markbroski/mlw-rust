@@ -3,6 +3,7 @@ use chrono::TimeZone;
 use chrono::{DateTime, Utc};
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::collections::HashSet;
 use std::fmt; // <--- ADD THIS LINE!
 
 use super::stake::{Stake, StakeId};
@@ -139,6 +140,10 @@ impl StakesCollection {
         self.stakes.is_empty()
     }
 
+    pub fn get_by_id(&self, id: &StakeId) -> Option<&Stake> {
+        self.stakes.iter().find(|stake| &stake.stake_id == id)
+    }
+
     pub fn active_stakes(&self) -> Vec<Stake> {
         self.stakes
             .iter()
@@ -155,6 +160,17 @@ impl StakesCollection {
         let current_id = self.next_id.clone();
         self.next_id.0 += 1;
         current_id
+    }
+
+    pub fn get_children(&self, parent_id: &StakeId) -> Vec<Stake> {
+        self.stakes
+            .iter()
+            .filter(|stake| {
+                // Check if stake.parent_id is Some(id) AND that inner id matches the provided parent_id
+                stake.parent_id.as_ref() == Some(parent_id)
+            })
+            .cloned() // Clone each matching Stake
+            .collect() // Collect into a new Vec
     }
 }
 
@@ -286,5 +302,182 @@ mod tests {
         assert_eq!(deserialized.stakes[0].date_modified, fixed_time);
         assert_eq!(deserialized.stakes[0].date_created, fixed_time);
         assert_eq!(deserialized.stakes[0].note, Some("A note".to_string()));
+    }
+
+    #[test]
+    fn test_stakes_collection_unique_ids() {
+        let mut collection = StakesCollection::new();
+        let num_stakes = 10_000; // Define the number of stakes to create
+        let mut seen_ids = HashSet::new(); // To track unique IDs
+
+        for i in 0..num_stakes {
+            let new_id = collection.generate_id();
+            let stake_name = format!("Stake {}", new_id.0);
+            let stake = create_test_stake(new_id.0, &stake_name, None, false, false, None);
+
+            // Assert that the generated ID is truly unique
+            assert!(
+                seen_ids.insert(new_id.0),
+                "Generated ID {} was not unique!",
+                new_id.0
+            );
+
+            // Add the stake to the collection (optional for this test, but good practice)
+            collection.add_stake(stake);
+        }
+
+        // Final checks
+        assert_eq!(
+            collection.len(),
+            num_stakes as usize,
+            "Collection should contain all generated stakes"
+        );
+        assert_eq!(
+            collection.next_id,
+            StakeId((num_stakes + 1) as u32),
+            "next_id should be correctly incremented"
+        );
+        assert_eq!(
+            seen_ids.len(),
+            num_stakes as usize,
+            "All generated IDs should be unique"
+        );
+    }
+
+    #[test]
+    fn test_stakes_collection_get_by_id() {
+        let mut collection = StakesCollection::new();
+
+        let stake1 = create_test_stake(1, "Stake A", None, false, false, None);
+        let stake2 = create_test_stake(2, "Stake B", Some(StakeId(1)), true, false, None);
+        let stake3 = create_test_stake(3, "Stake C", None, false, true, None);
+
+        collection.add_stake(stake1.clone());
+        collection.add_stake(stake2.clone());
+        collection.add_stake(stake3.clone());
+
+        // Test finding an existing stake
+        let found_stake_1 = collection.get_by_id(&StakeId(1));
+        assert!(found_stake_1.is_some(), "Should find Stake 1");
+        assert_eq!(
+            found_stake_1.unwrap(),
+            &stake1,
+            "Found Stake 1 should match original"
+        ); // Note: compare reference to owned
+
+        let found_stake_2 = collection.get_by_id(&StakeId(2));
+        assert!(found_stake_2.is_some(), "Should find Stake 2");
+        assert_eq!(
+            found_stake_2.unwrap(),
+            &stake2,
+            "Found Stake 2 should match original"
+        ); // Note: compare reference to owned
+
+        // Test not finding a non-existent stake
+        let not_found_stake = collection.get_by_id(&StakeId(999));
+        assert!(
+            not_found_stake.is_none(),
+            "Should not find non-existent stake"
+        );
+
+        // Test with empty collection
+        let empty_collection = StakesCollection::new();
+        let not_found_in_empty = empty_collection.get_by_id(&StakeId(1));
+        assert!(
+            not_found_in_empty.is_none(),
+            "Should not find stake in empty collection"
+        );
+
+        #[test]
+        fn test_stakes_collection_get_children() {
+            let mut collection = StakesCollection::new();
+
+            // Create some parent stakes
+            let parent_a = create_test_stake(10, "Parent A", None, false, false, None);
+            let parent_b = create_test_stake(20, "Parent B", None, false, false, None);
+
+            // Create children for Parent A
+            let child_a1 = create_test_stake(
+                11,
+                "Child A1",
+                Some(parent_a.stake_id.clone()),
+                false,
+                false,
+                None,
+            );
+            let child_a2 = create_test_stake(
+                12,
+                "Child A2",
+                Some(parent_a.stake_id.clone()),
+                false,
+                false,
+                None,
+            );
+
+            // Create a child for Parent B
+            let child_b1 = create_test_stake(
+                21,
+                "Child B1",
+                Some(parent_b.stake_id.clone()),
+                false,
+                false,
+                None,
+            );
+
+            // Create a top-level stake with no parent
+            let top_level_c = create_test_stake(30, "Top Level C", None, false, false, None);
+
+            // Add all stakes to the collection
+            collection.add_stake(parent_a.clone());
+            collection.add_stake(parent_b.clone());
+            collection.add_stake(child_a1.clone());
+            collection.add_stake(child_a2.clone());
+            collection.add_stake(child_b1.clone());
+            collection.add_stake(top_level_c.clone());
+
+            // Test retrieving children for Parent A
+            let children_of_a = collection.get_children(&parent_a.stake_id);
+            assert_eq!(children_of_a.len(), 2, "Parent A should have 2 children");
+            assert!(
+                children_of_a.contains(&child_a1),
+                "Children of A should contain A1"
+            );
+            assert!(
+                children_of_a.contains(&child_a2),
+                "Children of A should contain A2"
+            );
+            assert!(
+                !children_of_a.contains(&child_b1),
+                "Children of A should NOT contain B1"
+            );
+
+            // Test retrieving children for Parent B
+            let children_of_b = collection.get_children(&parent_b.stake_id);
+            assert_eq!(children_of_b.len(), 1, "Parent B should have 1 child");
+            assert!(
+                children_of_b.contains(&child_b1),
+                "Children of B should contain B1"
+            );
+
+            // Test retrieving children for a stake that has no children
+            let children_of_c = collection.get_children(&top_level_c.stake_id);
+            assert!(children_of_c.is_empty(), "Stake C should have no children");
+
+            // Test retrieving children for a non-existent parent ID
+            let non_existent_parent_id = StakeId(999);
+            let children_non_existent = collection.get_children(&non_existent_parent_id);
+            assert!(
+                children_non_existent.is_empty(),
+                "Non-existent parent should have no children"
+            );
+
+            // Test with an empty collection
+            let empty_collection = StakesCollection::new();
+            let children_in_empty = empty_collection.get_children(&StakeId(1));
+            assert!(
+                children_in_empty.is_empty(),
+                "Empty collection should have no children"
+            );
+        }
     }
 }
