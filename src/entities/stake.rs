@@ -6,6 +6,7 @@ pub struct StakeId(pub u32);
 
 // --- Custom Error Enum for Stake operations ---
 #[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum StakeError {
     // Note: Since `activate` method was removed, this error is not currently
     // returned by any method in the `Stake` struct.
