@@ -13,112 +13,6 @@ pub struct StakesCollection {
     next_id: StakeId,
 }
 
-// --- Custom Serialize implementation for StakesCollection ---
-impl Serialize for StakesCollection {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(2))?;
-
-        map.serialize_entry("nextId", &self.next_id.0)?;
-
-        map.serialize_entry("stakes", &self.stakes)?;
-
-        map.end()
-    }
-}
-
-// --- Custom Deserialize implementation for StakesCollection ---
-impl<'de> Deserialize<'de> for StakesCollection {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        enum Field {
-            NextId,
-            Stakes,
-        }
-
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                struct FieldVisitor;
-
-                impl<'de> Visitor<'de> for FieldVisitor {
-                    type Value = Field;
-
-                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str("`nextId` or `stakes`")
-                    }
-
-                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
-                    where
-                        E: de::Error,
-                    {
-                        match value {
-                            "nextId" => Ok(Field::NextId),
-                            "stakes" => Ok(Field::Stakes),
-                            _ => Err(de::Error::unknown_field(value, FIELDS)),
-                        }
-                    }
-                }
-
-                deserializer.deserialize_identifier(FieldVisitor)
-            }
-        }
-
-        struct StakesCollectionVisitor;
-
-        impl<'de> Visitor<'de> for StakesCollectionVisitor {
-            type Value = StakesCollection;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct StakesCollection")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<StakesCollection, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut next_id: Option<u32> = None;
-                let mut stakes: Option<Vec<Stake>> = None;
-
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::NextId => {
-                            if next_id.is_some() {
-                                return Err(de::Error::duplicate_field("nextId"));
-                            }
-                            next_id = Some(map.next_value()?);
-                        }
-                        Field::Stakes => {
-                            if stakes.is_some() {
-                                return Err(de::Error::duplicate_field("stakes"));
-                            }
-                            stakes = Some(map.next_value()?);
-                        }
-                    }
-                }
-
-                let next_id = next_id.ok_or_else(|| de::Error::missing_field("nextId"))?;
-                let stakes = stakes.ok_or_else(|| de::Error::missing_field("stakes"))?;
-
-                Ok(StakesCollection {
-                    stakes,
-                    next_id: StakeId(next_id),
-                })
-            }
-        }
-
-        const FIELDS: &'static [&'static str] = &["nextId", "stakes"];
-        deserializer.deserialize_struct("StakesCollection", FIELDS, StakesCollectionVisitor)
-    }
-}
-
 impl StakesCollection {
     pub fn new() -> Self {
         StakesCollection {
@@ -183,6 +77,10 @@ impl StakesCollection {
 
     pub fn completed_stakes(&self) -> Vec<&Stake> {
         self.stakes.iter().filter(|s| s.complete).collect()
+    }
+
+    pub fn next_id(&self) -> StakeId {
+        self.next_id.clone()
     }
 
     pub fn generate_id(&mut self) -> StakeId {
@@ -831,5 +729,110 @@ mod tests {
             StakeError::StakeNotFound,
             "Error should indicate stake not found"
         );
+    }
+}
+// --- Custom Serialize implementation for StakesCollection ---
+impl Serialize for StakesCollection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+
+        map.serialize_entry("nextId", &self.next_id.0)?;
+
+        map.serialize_entry("stakes", &self.stakes)?;
+
+        map.end()
+    }
+}
+
+// --- Custom Deserialize implementation for StakesCollection ---
+impl<'de> Deserialize<'de> for StakesCollection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        enum Field {
+            NextId,
+            Stakes,
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct FieldVisitor;
+
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                        formatter.write_str("`nextId` or `stakes`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "nextId" => Ok(Field::NextId),
+                            "stakes" => Ok(Field::Stakes),
+                            _ => Err(de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct StakesCollectionVisitor;
+
+        impl<'de> Visitor<'de> for StakesCollectionVisitor {
+            type Value = StakesCollection;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct StakesCollection")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<StakesCollection, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut next_id: Option<u32> = None;
+                let mut stakes: Option<Vec<Stake>> = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::NextId => {
+                            if next_id.is_some() {
+                                return Err(de::Error::duplicate_field("nextId"));
+                            }
+                            next_id = Some(map.next_value()?);
+                        }
+                        Field::Stakes => {
+                            if stakes.is_some() {
+                                return Err(de::Error::duplicate_field("stakes"));
+                            }
+                            stakes = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let next_id = next_id.ok_or_else(|| de::Error::missing_field("nextId"))?;
+                let stakes = stakes.ok_or_else(|| de::Error::missing_field("stakes"))?;
+
+                Ok(StakesCollection {
+                    stakes,
+                    next_id: StakeId(next_id),
+                })
+            }
+        }
+
+        const FIELDS: &'static [&'static str] = &["nextId", "stakes"];
+        deserializer.deserialize_struct("StakesCollection", FIELDS, StakesCollectionVisitor)
     }
 }
