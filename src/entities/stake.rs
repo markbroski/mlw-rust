@@ -12,6 +12,7 @@ pub enum StakeError {
     // returned by any method in the `Stake` struct.
     // If you re-introduce a method that can fail with this error, add a test for it.
     CannotActivateDroppedStake,
+    StakeNotFound,
     // Add other specific errors here later if needed
 }
 

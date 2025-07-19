@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::fmt; // <--- ADD THIS LINE!
 use std::time::Instant;
 
-use super::stake::{Stake, StakeId};
+use super::stake::{Stake, StakeError, StakeId};
 
 #[derive(Debug, Clone, PartialEq, Eq)] // Removed Serialize, Deserialize for custom impl
 pub struct StakesCollection {
@@ -133,6 +133,21 @@ impl StakesCollection {
 
     pub fn len(&self) -> usize {
         self.stakes.len()
+    }
+
+    pub fn update_stake(&mut self, new_stake: Stake) -> Result<(), StakeError> {
+        if let Some(index) = self
+            .stakes
+            .iter()
+            .position(|s| s.stake_id == new_stake.stake_id)
+        {
+            // Found the stake, replace it
+            self.stakes[index] = new_stake;
+            Ok(())
+        } else {
+            // Stake not found in the collection
+            Err(StakeError::StakeNotFound)
+        }
     }
 
     pub fn search_by_name(&self, query: &str) -> Vec<&Stake> {
@@ -764,6 +779,57 @@ mod tests {
         assert!(
             !results.is_empty(),
             "Should find at least some matches for the target query."
+        );
+    }
+
+    #[test]
+    fn test_stakes_collection_update_stake() {
+        let mut collection = StakesCollection::new();
+
+        let initial_stake = create_test_stake(
+            1,
+            "Stake to Update",
+            None,
+            false,
+            false,
+            Some("Initial note".to_string()),
+        );
+        collection.add_stake(initial_stake.clone());
+
+        // Create a modified version of the stake
+        let mut modified_stake = initial_stake.clone();
+        modified_stake.mark_complete();
+        modified_stake.note = Some("Updated note after completion".to_string());
+
+        // Attempt to update the stake in the collection
+        let update_result = collection.update_stake(modified_stake.clone());
+
+        // Assert that the update succeeded
+        assert!(update_result.is_ok(), "Update should succeed");
+
+        // Retrieve the stake from the collection to verify changes
+        let retrieved_stake = collection.get_by_id(&modified_stake.stake_id);
+        assert!(
+            retrieved_stake.is_some(),
+            "Updated stake should still be in collection"
+        );
+        assert_eq!(
+            retrieved_stake.unwrap(),
+            &modified_stake,
+            "Stake in collection should reflect updates"
+        );
+
+        // Test updating a non-existent stake (should fail)
+        let non_existent_stake = create_test_stake(999, "Non Existent", None, false, false, None);
+        let failed_update_result = collection.update_stake(non_existent_stake);
+        assert!(
+            failed_update_result.is_err(),
+            "Updating non-existent stake should fail"
+        );
+        assert_eq!(
+            failed_update_result.unwrap_err(),
+            StakeError::StakeNotFound,
+            "Error should indicate stake not found"
         );
     }
 }
