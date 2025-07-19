@@ -1,11 +1,16 @@
 mod entities;
 
-use entities::{AreaId, Project, ProjectId};
+use entities::{Stake, StakeId};
 
 fn main() {
-    let project_id = ProjectId(1);
-    let area_id = AreaId(22);
-    let mut project = Project::new(project_id, "Clean the Garage".to_string(), area_id);
+    let project_id = StakeId(1);
+    let area_id = StakeId(22);
+    let mut project = Stake::new(
+        project_id,
+        "Clean the Garage".to_string(),
+        Some(area_id),
+        None,
+    );
 
     println!("Initial Project: {:?}", project);
 
