@@ -1,0 +1,17 @@
+[package]
+name = "mlw-rust"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Required for `#[derive(Serialize, Deserialize)]` on your structs/enums
+serde = { version = "1.0", features = ["derive"] }
+
+# Required if you want to serialize/deserialize to/from JSON
+# (or choose another format like toml, yaml, etc.)
+serde_json = "1.0"
+
+# (Optional, but often useful) If you're working with dates and times
+# and also want them to be serializable/deserializable by serde.
+# Note: The `serde` feature in chrono is specifically for its integration with serde.
+chrono = { version = "0.4", features = ["serde"] }
