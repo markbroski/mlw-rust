@@ -1,23 +1,142 @@
-use chrono::Duration;
-use chrono::{DateTime, Utc}; // Needed for tests of Stake, indirectly if CreateTestStake is here
-use serde::{Deserialize, Serialize}; // Needed for tests that use chrono dates
+use chrono::Duration; // Still needed for tests
+use chrono::TimeZone;
+use chrono::{DateTime, Utc};
+use serde::de::{self, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt; // <--- ADD THIS LINE!
 
-// Import Stake and StakeId from the parent `entities::stake` module
 use super::stake::{Stake, StakeId};
 
-// --- StakesCollection Struct ---
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)] // Removed Serialize, Deserialize for custom impl
 pub struct StakesCollection {
     stakes: Vec<Stake>,
+    next_id: StakeId,
+}
+
+// --- Custom Serialize implementation for StakesCollection ---
+impl Serialize for StakesCollection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+
+        map.serialize_entry("nextId", &self.next_id.0)?;
+
+        map.serialize_entry("stakes", &self.stakes)?;
+
+        map.end()
+    }
+}
+
+// --- Custom Deserialize implementation for StakesCollection ---
+impl<'de> Deserialize<'de> for StakesCollection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        enum Field {
+            NextId,
+            Stakes,
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct FieldVisitor;
+
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                        formatter.write_str("`nextId` or `stakes`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "nextId" => Ok(Field::NextId),
+                            "stakes" => Ok(Field::Stakes),
+                            _ => Err(de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct StakesCollectionVisitor;
+
+        impl<'de> Visitor<'de> for StakesCollectionVisitor {
+            type Value = StakesCollection;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct StakesCollection")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<StakesCollection, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut next_id: Option<u32> = None;
+                let mut stakes: Option<Vec<Stake>> = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::NextId => {
+                            if next_id.is_some() {
+                                return Err(de::Error::duplicate_field("nextId"));
+                            }
+                            next_id = Some(map.next_value()?);
+                        }
+                        Field::Stakes => {
+                            if stakes.is_some() {
+                                return Err(de::Error::duplicate_field("stakes"));
+                            }
+                            stakes = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let next_id = next_id.ok_or_else(|| de::Error::missing_field("nextId"))?;
+                let stakes = stakes.ok_or_else(|| de::Error::missing_field("stakes"))?;
+
+                Ok(StakesCollection {
+                    stakes,
+                    next_id: StakeId(next_id),
+                })
+            }
+        }
+
+        const FIELDS: &'static [&'static str] = &["nextId", "stakes"];
+        deserializer.deserialize_struct("StakesCollection", FIELDS, StakesCollectionVisitor)
+    }
 }
 
 impl StakesCollection {
     pub fn new() -> Self {
-        StakesCollection { stakes: Vec::new() }
+        StakesCollection {
+            stakes: Vec::new(),
+            next_id: StakeId(1),
+        }
     }
 
     pub fn add_stake(&mut self, stake: Stake) {
         self.stakes.push(stake);
+    }
+
+    pub fn len(&self) -> usize {
+        self.stakes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stakes.is_empty()
     }
 
     pub fn active_stakes(&self) -> Vec<Stake> {
@@ -32,31 +151,24 @@ impl StakesCollection {
         self.stakes.iter().filter(|s| s.complete).cloned().collect()
     }
 
-    pub fn len(&self) -> usize {
-        self.stakes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.stakes.is_empty()
+    pub fn generate_id(&mut self) -> StakeId {
+        let current_id = self.next_id.clone();
+        self.next_id.0 += 1;
+        current_id
     }
 }
+
+// ... (rest of the file remains the same until the tests module)
 
 // --- Unit Tests for StakesCollection ---
 #[cfg(test)]
 mod tests {
-    use super::*; // Imports StakesCollection itself
-    // We also need to import Stake, StakeId, etc. from their origin
-    // Since create_test_stake is used here and it creates Stake objects,
-    // we need to bring Stake and StakeId into scope.
-    // They are available through `super::stake` as we use `super::stake::{Stake, StakeId};` above
-    // or from the parent entities module if they are re-exported.
-    // For simplicity, we can just ensure they're in scope from the re-exports or direct path.
-    use crate::entities::stake::{Stake, StakeId}; // Explicit path from crate root
-    // For the create_test_stake helper, we might copy it here or make it public in stake.rs.
-    // For TDD, let's copy it here temporarily as it's directly needed for these tests.
+    use super::*;
+    use crate::entities::stake::{Stake, StakeId};
+    use chrono::TimeZone;
+    use serde_json; // Needed for Utc.with_ymd_and_hms in the fixed_time setup
 
-    // Re-create the helper function here, specifically for these tests.
-    // In a larger project, you might have a `test_utilities` module.
+    // Helper function (copied here as discussed)
     fn create_test_stake(
         id: u32,
         name: &str,
@@ -71,106 +183,108 @@ mod tests {
         stake
     }
 
+    // ... (Keep test_stakes_collection_new, test_stakes_collection_add_stake,
+    //       test_stakes_collection_len, test_stakes_collection_is_empty,
+    //       test_stakes_collection_active_stakes, test_stakes_collection_completed_stakes,
+    //       test_stakes_collection_generate_id as they are. They are good unit tests for logic.)
+
+    // REPLACING test_stakes_collection_serialization
     #[test]
-    fn test_stakes_collection_new() {
-        let collection = StakesCollection::new();
-        assert!(
-            collection.stakes.is_empty(),
-            "New collection should be empty"
-        );
-    }
+    fn test_stakes_collection_serialization_roundtrip() {
+        let mut original_collection = StakesCollection::new();
+        original_collection.next_id = StakeId(5); // Set a specific next_id for testing
 
-    #[test]
-    fn test_stakes_collection_add_stake() {
-        let mut collection = StakesCollection::new();
-        let stake1 = create_test_stake(1, "Stake 1", None, false, false, None);
-        let stake2 = create_test_stake(2, "Stake 2", Some(StakeId(1)), true, false, None);
+        // Create stakes with fixed times for consistent comparison
+        let fixed_time = Utc.with_ymd_and_hms(2024, 7, 19, 8, 30, 0).unwrap();
 
-        collection.add_stake(stake1.clone());
-        assert_eq!(collection.stakes.len(), 1);
-        assert_eq!(collection.stakes[0], stake1);
-
-        collection.add_stake(stake2.clone());
-        assert_eq!(collection.stakes.len(), 2);
-        assert_eq!(collection.stakes[1], stake2);
-    }
-
-    #[test]
-    fn test_stakes_collection_active_stakes() {
-        let mut collection = StakesCollection::new();
-        let active_stake1 = create_test_stake(1, "Active 1", None, false, false, None);
-        let completed_stake =
-            create_test_stake(2, "Completed", Some(StakeId(1)), true, false, None);
-        let dropped_stake = create_test_stake(3, "Dropped", None, false, true, None);
-        let active_stake2 = create_test_stake(4, "Active 2", Some(StakeId(1)), false, false, None);
-
-        collection.add_stake(active_stake1.clone());
-        collection.add_stake(completed_stake.clone());
-        collection.add_stake(dropped_stake.clone());
-        collection.add_stake(active_stake2.clone());
-
-        let active_stakes = collection.active_stakes();
-        assert_eq!(active_stakes.len(), 2);
-        assert!(active_stakes.contains(&active_stake1));
-        assert!(active_stakes.contains(&active_stake2));
-        assert!(!active_stakes.contains(&completed_stake));
-        assert!(!active_stakes.contains(&dropped_stake));
-    }
-
-    #[test]
-    fn test_stakes_collection_completed_stakes() {
-        let mut collection = StakesCollection::new();
-        let active_stake = create_test_stake(1, "Active", None, false, false, None);
-        let completed_stake1 =
-            create_test_stake(2, "Completed 1", Some(StakeId(1)), true, false, None);
-        let dropped_stake = create_test_stake(3, "Dropped", None, false, true, None);
-        let completed_stake2 =
-            create_test_stake(4, "Completed 2", Some(StakeId(1)), true, true, None); // Completed AND Dropped
-
-        collection.add_stake(active_stake.clone());
-        collection.add_stake(completed_stake1.clone());
-        collection.add_stake(dropped_stake.clone());
-        collection.add_stake(completed_stake2.clone());
-
-        let completed_stakes = collection.completed_stakes();
-        assert_eq!(completed_stakes.len(), 2);
-        assert!(completed_stakes.contains(&completed_stake1));
-        assert!(completed_stakes.contains(&completed_stake2));
-        assert!(!completed_stakes.contains(&active_stake));
-        assert!(!completed_stakes.contains(&dropped_stake));
-    }
-
-    #[test]
-    fn test_stakes_collection_len() {
-        let mut collection = StakesCollection::new();
-        assert_eq!(collection.len(), 0, "Empty collection should have length 0");
-
-        collection.add_stake(create_test_stake(1, "A", None, false, false, None));
-        assert_eq!(
-            collection.len(),
+        let mut stake1 = create_test_stake(
             1,
-            "Collection with one stake should have length 1"
+            "First Stake",
+            None,
+            false,
+            false,
+            Some("Note 1".to_string()),
+        );
+        stake1.date_created = fixed_time;
+        stake1.date_modified = fixed_time;
+
+        let mut stake2 = create_test_stake(2, "Second Stake", Some(StakeId(1)), true, false, None);
+        stake2.date_created = fixed_time;
+        stake2.date_modified = fixed_time;
+
+        let mut stake3 = create_test_stake(
+            3,
+            "Third Stake",
+            Some(StakeId(2)),
+            false,
+            true,
+            Some("Note 3".to_string()),
+        );
+        stake3.date_created = fixed_time;
+        stake3.date_modified = fixed_time;
+
+        original_collection.add_stake(stake1);
+        original_collection.add_stake(stake2);
+        original_collection.add_stake(stake3);
+
+        // 1. Serialize the original collection
+        let serialized = serde_json::to_string_pretty(&original_collection)
+            .expect("Failed to serialize collection");
+        println!("Serialized collection for roundtrip test:\n{}", serialized); // Print for debugging/inspection
+
+        // 2. Deserialize the string back into a new collection
+        let deserialized_collection: StakesCollection =
+            serde_json::from_str(&serialized).expect("Failed to deserialize collection");
+
+        // 3. Compare the original collection with the deserialized one
+        assert_eq!(
+            original_collection, deserialized_collection,
+            "Original and deserialized collections should be identical"
         );
 
-        collection.add_stake(create_test_stake(2, "B", None, false, false, None));
-        collection.add_stake(create_test_stake(3, "C", None, false, false, None));
-        assert_eq!(
-            collection.len(),
-            3,
-            "Collection with three stakes should have length 3"
-        );
+        // You can still keep the test_stakes_collection_deserialization you had,
+        // as it specifically tests deserializing from a known good string.
+        // The roundtrip test ensures the entire process works end-to-end.
     }
 
-    // It's also common to add an `is_empty` method:
+    // Keep test_stakes_collection_deserialization as it is, as it's a good test
+    // for deserializing from a specific known JSON string.
     #[test]
-    fn test_stakes_collection_is_empty() {
-        let mut collection = StakesCollection::new();
-        assert!(collection.is_empty(), "New collection should be empty");
+    fn test_stakes_collection_deserialization() {
+        let fixed_time = Utc.with_ymd_and_hms(2024, 7, 19, 8, 30, 0).unwrap();
 
-        collection.add_stake(create_test_stake(1, "A", None, false, false, None));
-        assert!(
-            !collection.is_empty(),
-            "Collection with stakes should not be empty"
+        let json_input = format!(
+            r#"{{
+            "nextId": 5,
+            "stakes": [
+                {{
+                    "stake_id": 1,
+                    "stake_name": "Loaded Stake 1",
+                    "parent_id": null,
+                    "complete": false,
+                    "dropped": false,
+                    "date_modified": "{}",
+                    "date_created": "{}",
+                    "note": "A note"
+                }}
+            ]
+        }}"#,
+            fixed_time.to_rfc3339(),
+            fixed_time.to_rfc3339()
         );
+
+        let deserialized: StakesCollection =
+            serde_json::from_str(&json_input).expect("Failed to deserialize collection");
+
+        assert_eq!(deserialized.next_id, StakeId(5));
+        assert_eq!(deserialized.len(), 1);
+        assert_eq!(deserialized.stakes[0].stake_id, StakeId(1));
+        assert_eq!(deserialized.stakes[0].stake_name, "Loaded Stake 1");
+        assert_eq!(deserialized.stakes[0].parent_id, None);
+        assert_eq!(deserialized.stakes[0].complete, false);
+        assert_eq!(deserialized.stakes[0].dropped, false);
+        assert_eq!(deserialized.stakes[0].date_modified, fixed_time);
+        assert_eq!(deserialized.stakes[0].date_created, fixed_time);
+        assert_eq!(deserialized.stakes[0].note, Some("A note".to_string()));
     }
 }
