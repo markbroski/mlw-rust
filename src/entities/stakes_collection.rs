@@ -135,6 +135,25 @@ impl StakesCollection {
         self.stakes.len()
     }
 
+    pub fn search_by_name(&self, query: &str) -> Vec<&Stake> {
+        // Prepare the query for case-insensitive partial matching
+        let lower_query = query.trim().to_lowercase(); // Trim whitespace and convert to lowercase
+
+        if lower_query.is_empty() {
+            // If the query is empty after trimming, return all active stakes (or all stakes, depending on logic)
+            // For a 'search' method, an empty query usually means 'return all'
+            return self.stakes.iter().collect();
+        }
+
+        self.stakes
+            .iter()
+            .filter(|stake| {
+                // Convert stake's name to lowercase and check if it contains the lower_query
+                stake.stake_name.to_lowercase().contains(&lower_query)
+            })
+            .collect() // Collect references to matching stakes
+    }
+
     pub fn is_empty(&self) -> bool {
         self.stakes.is_empty()
     }
@@ -609,5 +628,142 @@ mod tests {
         assert!(completed_stakes.contains(&&completed_stake2));
         assert!(!completed_stakes.contains(&&active_stake));
         assert!(!completed_stakes.contains(&&dropped_stake));
+    }
+
+    #[test]
+    fn test_stakes_collection_search_by_name_functional() {
+        let mut collection = StakesCollection::new();
+
+        // Setup various stakes for testing search
+        let stake1 = create_test_stake(1, "Website Redesign", None, false, false, None);
+        let stake2 = create_test_stake(2, "Mobile App Development", None, true, false, None);
+        let stake3 = create_test_stake(3, "Marketing Campaign Launch", None, false, true, None);
+        let stake4 =
+            create_test_stake(4, "Redesign Homepage", Some(StakeId(1)), false, false, None); // Partial match 'Redesign'
+        let stake5 = create_test_stake(
+            5,
+            "Internal Review",
+            None,
+            false,
+            false,
+            Some("Review all marketing materials".to_string()),
+        );
+        let stake6 = create_test_stake(6, "Brand Refresh", None, false, false, None);
+
+        collection.add_stake(stake1.clone());
+        collection.add_stake(stake2.clone());
+        collection.add_stake(stake3.clone());
+        collection.add_stake(stake4.clone());
+        collection.add_stake(stake5.clone());
+        collection.add_stake(stake6.clone());
+
+        // Test 1: Exact match, case-insensitive
+        let results1 = collection.search_by_name("website redesign");
+        assert_eq!(
+            results1.len(),
+            1,
+            "Should find 1 exact match (case-insensitive)"
+        );
+        assert!(results1.contains(&&stake1));
+
+        // Test 2: Partial match, case-insensitive
+        let results2 = collection.search_by_name("design");
+        assert_eq!(
+            results2.len(),
+            2,
+            "Should find 2 partial matches (Website Redesign, Redesign Homepage)"
+        );
+        assert!(results2.contains(&&stake1));
+        assert!(results2.contains(&&stake4));
+
+        // Test 3: No match
+        let results3 = collection.search_by_name("nonexistent");
+        assert!(
+            results3.is_empty(),
+            "Should find no matches for non-existent query"
+        );
+
+        // Test 4: Match beginning of word
+        let results4 = collection.search_by_name("web");
+        assert_eq!(results4.len(), 1, "Should find 'Website Redesign'");
+        assert!(results4.contains(&&stake1));
+
+        // Test 5: Match middle of word
+        let results5 = collection.search_by_name("app develop");
+        assert_eq!(results5.len(), 1, "Should find 'Mobile App Development'");
+        assert!(results5.contains(&&stake2));
+
+        // Test 6: Search for an empty string (should return all stakes)
+        let results6 = collection.search_by_name("");
+        assert_eq!(
+            results6.len(),
+            collection.len(),
+            "Empty query should return all stakes"
+        );
+
+        // Test 7: Search with leading/trailing whitespace (should still work after trimming if implemented, or might fail if not trimmed)
+        let results7 = collection.search_by_name("  redesign  "); // Assuming no trim in method
+        assert_eq!(
+            results7.len(),
+            2,
+            "Should find matches even with whitespace around query"
+        );
+        assert!(results7.contains(&&stake1));
+        assert!(results7.contains(&&stake4));
+    }
+
+    // NEW FAILING TEST: test_performance_search_by_name
+    #[test]
+    fn test_performance_search_by_name() {
+        let mut collection = StakesCollection::new();
+        let num_stakes = 10_000;
+        let search_query = "perf_target"; // A unique string to search for
+        let mut expected_matches = 0;
+
+        // Populate the collection
+        for i in 1..=num_stakes {
+            let stake_name = if i % 100 == 0 {
+                // Every 100th stake will contain the query
+                expected_matches += 1;
+                format!("Stake {} - {} - other text", i, search_query)
+            } else if i == 500 {
+                // Add one exact match at a specific ID
+                expected_matches += 1;
+                search_query.to_string()
+            } else {
+                format!("Stake {}", i)
+            };
+            collection.add_stake(create_test_stake(
+                i as u32,
+                &stake_name,
+                None,
+                false,
+                false,
+                None,
+            ));
+        }
+
+        println!(
+            "\nPerformance Test: Searching for '{}' in {} stakes.",
+            search_query, num_stakes
+        );
+
+        let start_time = Instant::now(); // Start measuring time
+
+        let results = collection.search_by_name(search_query);
+
+        let elapsed_time = start_time.elapsed(); // Stop measuring time
+
+        println!("Found {} matches in {:?}", results.len(), elapsed_time);
+
+        assert_eq!(
+            results.len(),
+            expected_matches,
+            "The number of search matches should be as expected."
+        );
+        assert!(
+            !results.is_empty(),
+            "Should find at least some matches for the target query."
+        );
     }
 }
