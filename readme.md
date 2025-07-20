@@ -41,8 +41,8 @@ To get this project up and running on your local machine:
 
 ### **Cloning the Repository**
 
-git clone https://github.com/your-username/my-life-s-work.git \# Replace with your actual repository URL  
-cd my-life-s-work
+git clone https://github.com/markbroski/mlw-rust
+cd mlw-rust
 
 ### **Building the Project**
 
