@@ -9,7 +9,7 @@ use entities::{Stake, StakeId, StakesCollection};
 use mlw::MLW; // StakeError is not used here directly
 
 fn main() {
-    let mut mlw_app = MLW::new();
+    let mlw_app = MLW::new();
     let mut areas = StakesCollection::new();
     // let projects = StakesCollection::new();
     // let mut tasks = StakesCollection::new();

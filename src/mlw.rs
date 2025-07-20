@@ -54,31 +54,28 @@ impl MLW {
         self.areas.update_stake(stake)
     }
 
-    /// Marks an area Stake as complete and updates its modified date.
-    /// Returns `Ok(())` if the stake was found and updated, `Err(StakeError::StakeNotFound)` otherwise.
-    pub fn mark_area_complete(&mut self, id: &StakeId) -> Result<(), StakeError> {
-        // Retrieve a mutable copy, modify it, then update in collection
-        let mut stake_to_update = self
+    fn locate_area(&self, id: &StakeId) -> Result<Stake, StakeError> {
+        Ok(self
             .areas
             .get_by_id(id)
             .ok_or(StakeError::StakeNotFound)?
-            .clone(); // Clone to get an owned, mutable copy
+            .clone())
+    }
 
-        stake_to_update.mark_complete();
-        self.areas.update_stake(stake_to_update)
+    /// Marks an area Stake as complete and updates its modified date.
+    /// Returns `Ok(())` if the stake was found and updated, `Err(StakeError::StakeNotFound)` otherwise.
+    pub fn mark_area_complete(&mut self, id: &StakeId) -> Result<(), StakeError> {
+        let mut area_to_update = self.locate_area(id)?;
+        area_to_update.complete = true;
+        self.areas.update_stake(area_to_update)
     }
 
     /// Marks an area Stake as dropped and updates its modified date.
     /// Returns `Ok(())` if the stake was found and updated, `Err(StakeError::StakeNotFound)` otherwise.
     pub fn mark_area_dropped(&mut self, id: &StakeId) -> Result<(), StakeError> {
-        let mut stake_to_update = self
-            .areas
-            .get_by_id(id)
-            .ok_or(StakeError::StakeNotFound)?
-            .clone();
-
-        stake_to_update.mark_dropped();
-        self.areas.update_stake(stake_to_update)
+        let mut area_to_update = self.locate_area(id)?;
+        area_to_update.dropped = true;
+        self.areas.update_stake(area_to_update)
     }
 
     // --- Project Management Methods (Placeholder - you'll build these out next) ---
@@ -108,23 +105,22 @@ impl MLW {
     pub fn update_project(&mut self, stake: Stake) -> Result<(), StakeError> {
         self.projects.update_stake(stake)
     }
-    pub fn mark_project_complete(&mut self, id: &StakeId) -> Result<(), StakeError> {
-        let mut stake_to_update = self
+    fn locate_project(&self, id: &StakeId) -> Result<Stake, StakeError> {
+        Ok(self
             .projects
             .get_by_id(id)
             .ok_or(StakeError::StakeNotFound)?
-            .clone();
-        stake_to_update.mark_complete();
-        self.projects.update_stake(stake_to_update)
+            .clone())
+    }
+    pub fn mark_project_complete(&mut self, id: &StakeId) -> Result<(), StakeError> {
+        let mut project_to_update = self.locate_project(id)?;
+        project_to_update.complete = true;
+        self.projects.update_stake(project_to_update)
     }
     pub fn mark_project_dropped(&mut self, id: &StakeId) -> Result<(), StakeError> {
-        let mut stake_to_update = self
-            .projects
-            .get_by_id(id)
-            .ok_or(StakeError::StakeNotFound)?
-            .clone();
-        stake_to_update.mark_dropped();
-        self.projects.update_stake(stake_to_update)
+        let mut project_to_update = self.locate_project(id)?;
+        project_to_update.dropped = true;
+        self.projects.update_stake(project_to_update)
     }
     pub fn get_project_children(&self, parent_id: &StakeId) -> Vec<&Stake> {
         self.projects.get_children(parent_id)
@@ -157,23 +153,23 @@ impl MLW {
     pub fn update_task(&mut self, stake: Stake) -> Result<(), StakeError> {
         self.tasks.update_stake(stake)
     }
-    pub fn mark_task_complete(&mut self, id: &StakeId) -> Result<(), StakeError> {
-        let mut stake_to_update = self
+
+    fn locate_task(&self, id: &StakeId) -> Result<Stake, StakeError> {
+        Ok(self
             .tasks
             .get_by_id(id)
             .ok_or(StakeError::StakeNotFound)?
-            .clone();
-        stake_to_update.mark_complete();
-        self.tasks.update_stake(stake_to_update)
+            .clone())
+    }
+    pub fn mark_task_complete(&mut self, id: &StakeId) -> Result<(), StakeError> {
+        let mut task_to_update = self.locate_task(id)?;
+        task_to_update.complete = true;
+        self.tasks.update_stake(task_to_update)
     }
     pub fn mark_task_dropped(&mut self, id: &StakeId) -> Result<(), StakeError> {
-        let mut stake_to_update = self
-            .tasks
-            .get_by_id(id)
-            .ok_or(StakeError::StakeNotFound)?
-            .clone();
-        stake_to_update.mark_dropped();
-        self.tasks.update_stake(stake_to_update)
+        let mut task_to_update = self.locate_task(id)?;
+        task_to_update.dropped = true;
+        self.tasks.update_stake(task_to_update)
     }
     pub fn get_task_children(&self, parent_id: &StakeId) -> Vec<&Stake> {
         self.tasks.get_children(parent_id)
@@ -353,7 +349,7 @@ mod tests {
     fn test_mlw_active_areas_returns_only_active() {
         let mut mlw = MLW::new();
         let active1 = mlw.new_area("Active 1".to_string(), None);
-        let mut completed1 = mlw.new_area("Completed 1".to_string(), None);
+        let completed1 = mlw.new_area("Completed 1".to_string(), None);
         let _ = mlw.mark_area_complete(&completed1.stake_id); // Update in collection
         let active2 = mlw.new_area("Active 2".to_string(), None);
 
@@ -372,7 +368,7 @@ mod tests {
     fn test_mlw_completed_areas_returns_only_completed() {
         let mut mlw = MLW::new();
         let active1 = mlw.new_area("Active 1".to_string(), None);
-        let mut completed1 = mlw.new_area("Completed 1".to_string(), None);
+        let completed1 = mlw.new_area("Completed 1".to_string(), None);
         let _ = mlw.mark_area_complete(&completed1.stake_id); // Update in collection
         let active2 = mlw.new_area("Active 2".to_string(), None);
 
@@ -562,7 +558,7 @@ mod tests {
         fn test_mlw_active_projects_returns_only_active() {
             let mut mlw = MLW::new();
             let active1 = mlw.new_project("Active 1".to_string(), None, None);
-            let mut completed1 = mlw.new_project("Completed 1".to_string(), None, None);
+            let completed1 = mlw.new_project("Completed 1".to_string(), None, None);
             let _ = mlw.mark_project_complete(&completed1.stake_id);
             let active2 = mlw.new_project("Active 2".to_string(), None, None);
 
@@ -581,7 +577,7 @@ mod tests {
         fn test_mlw_completed_projects_returns_only_completed() {
             let mut mlw = MLW::new();
             let active1 = mlw.new_project("Active 1".to_string(), None, None);
-            let mut completed1 = mlw.new_project("Completed 1".to_string(), None, None);
+            let completed1 = mlw.new_project("Completed 1".to_string(), None, None);
             let _ = mlw.mark_project_complete(&completed1.stake_id);
             let active2 = mlw.new_project("Active 2".to_string(), None, None);
 
@@ -807,7 +803,7 @@ mod tests {
         fn test_mlw_active_tasks_returns_only_active() {
             let mut mlw = MLW::new();
             let active1 = mlw.new_task("Active 1".to_string(), None, None);
-            let mut completed1 = mlw.new_task("Completed 1".to_string(), None, None);
+            let completed1 = mlw.new_task("Completed 1".to_string(), None, None);
             let _ = mlw.mark_task_complete(&completed1.stake_id);
             let active2 = mlw.new_task("Active 2".to_string(), None, None);
 
@@ -826,7 +822,7 @@ mod tests {
         fn test_mlw_completed_tasks_returns_only_completed() {
             let mut mlw = MLW::new();
             let active1 = mlw.new_task("Active 1".to_string(), None, None);
-            let mut completed1 = mlw.new_task("Completed 1".to_string(), None, None);
+            let completed1 = mlw.new_task("Completed 1".to_string(), None, None);
             let _ = mlw.mark_task_complete(&completed1.stake_id);
             let active2 = mlw.new_task("Active 2".to_string(), None, None);
 

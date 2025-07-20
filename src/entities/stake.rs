@@ -27,6 +27,7 @@ pub struct Stake {
     pub note: Option<String>,
     pub date_modified: DateTime<Utc>,
     pub date_created: DateTime<Utc>,
+    pub date_reviewed: Option<DateTime<Utc>>,
 }
 
 impl Stake {
@@ -48,6 +49,7 @@ impl Stake {
             note,
             date_modified: now,
             date_created: now,
+            date_reviewed: None,
         }
     }
 
@@ -68,6 +70,10 @@ impl Stake {
     /// Logic: active = !dropped AND !complete
     pub fn is_active(&self) -> bool {
         !self.dropped && !self.complete
+    }
+
+    pub fn mark_reviewed(&mut self) {
+        self.date_reviewed = Some(Utc::now());
     }
 }
 
