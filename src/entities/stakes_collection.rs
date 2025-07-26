@@ -1,28 +1,29 @@
 use chrono::Utc;
+use indexmap::IndexMap;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashSet;
-use std::fmt; // <--- ADD THIS LINE!
+use std::fmt;
 use std::time::Instant;
 
 use super::stake::{Stake, StakeError, StakeId};
 
 #[derive(Debug, Clone, PartialEq, Eq)] // Removed Serialize, Deserialize for custom impl
 pub struct StakesCollection {
-    stakes: Vec<Stake>,
+    stakes: IndexMap<StakeId, Stake>,
     next_id: StakeId,
 }
 
 impl StakesCollection {
     pub fn new() -> Self {
         StakesCollection {
-            stakes: Vec::new(),
+            stakes: IndexMap::new(),
             next_id: StakeId(1),
         }
     }
 
     pub fn add_stake(&mut self, stake: Stake) {
-        self.stakes.push(stake);
+        self.stakes.insert(stake.stake_id.clone(), stake);
     }
 
     pub fn len(&self) -> usize {
@@ -30,16 +31,10 @@ impl StakesCollection {
     }
 
     pub fn update_stake(&mut self, new_stake: Stake) -> Result<(), StakeError> {
-        if let Some(index) = self
-            .stakes
-            .iter()
-            .position(|s| s.stake_id == new_stake.stake_id)
-        {
-            // Found the stake, replace it
-            self.stakes[index] = new_stake;
+        if self.stakes.contains_key(&new_stake.stake_id) {
+            self.stakes.insert(new_stake.stake_id.clone(), new_stake);
             Ok(())
         } else {
-            // Stake not found in the collection
             Err(StakeError::StakeNotFound)
         }
     }
@@ -51,11 +46,11 @@ impl StakesCollection {
         if lower_query.is_empty() {
             // If the query is empty after trimming, return all active stakes (or all stakes, depending on logic)
             // For a 'search' method, an empty query usually means 'return all'
-            return self.stakes.iter().collect();
+            return self.stakes.values().collect();
         }
 
         self.stakes
-            .iter()
+            .values()
             .filter(|stake| {
                 // Convert stake's name to lowercase and check if it contains the lower_query
                 stake.stake_name.to_lowercase().contains(&lower_query)
@@ -68,15 +63,15 @@ impl StakesCollection {
     }
 
     pub fn get_by_id(&self, id: &StakeId) -> Option<&Stake> {
-        self.stakes.iter().find(|stake| &stake.stake_id == id)
+        self.stakes.values().find(|stake| &stake.stake_id == id)
     }
 
     pub fn active_stakes(&self) -> Vec<&Stake> {
-        self.stakes.iter().filter(|s| s.is_active()).collect()
+        self.stakes.values().filter(|s| s.is_active()).collect()
     }
 
     pub fn completed_stakes(&self) -> Vec<&Stake> {
-        self.stakes.iter().filter(|s| s.complete).collect()
+        self.stakes.values().filter(|s| s.complete).collect()
     }
 
     pub fn next_id(&self) -> StakeId {
@@ -91,10 +86,10 @@ impl StakesCollection {
 
     pub fn get_children(&self, parent_id: &StakeId) -> Vec<&Stake> {
         self.stakes
-            .iter()
+            .values()
             .filter(|stake| {
                 // Check if stake.parent_id is Some(id) AND that inner id matches the provided parent_id
-                stake.parent_id.as_ref() == Some(parent_id)
+                stake.parent_id.as_ref() == Some(parent_id) && stake.is_active() == true
             })
             .collect() // Collect into a new Vec
     }
@@ -198,8 +193,8 @@ mod tests {
         let json_input = format!(
             r#"{{
             "nextId": 5,
-            "stakes": [
-                {{
+            "stakes": {{
+                "1": {{
                     "stake_id": 1,
                     "stake_name": "Loaded Stake 1",
                     "parent_id": null,
@@ -207,9 +202,10 @@ mod tests {
                     "dropped": false,
                     "date_modified": "{}",
                     "date_created": "{}",
-                    "note": "A note"
+                    "note": "A note",
+                    "date_reviewed": null
                 }}
-            ]
+            }}
         }}"#,
             fixed_time.to_rfc3339(),
             fixed_time.to_rfc3339()
@@ -220,14 +216,20 @@ mod tests {
 
         assert_eq!(deserialized.next_id, StakeId(5));
         assert_eq!(deserialized.len(), 1);
-        assert_eq!(deserialized.stakes[0].stake_id, StakeId(1));
-        assert_eq!(deserialized.stakes[0].stake_name, "Loaded Stake 1");
-        assert_eq!(deserialized.stakes[0].parent_id, None);
-        assert_eq!(deserialized.stakes[0].complete, false);
-        assert_eq!(deserialized.stakes[0].dropped, false);
-        assert_eq!(deserialized.stakes[0].date_modified, fixed_time);
-        assert_eq!(deserialized.stakes[0].date_created, fixed_time);
-        assert_eq!(deserialized.stakes[0].note, Some("A note".to_string()));
+
+        let stake = deserialized
+            .stakes
+            .get(&StakeId(1))
+            .expect("Stake with ID 1 should be present");
+
+        assert_eq!(stake.stake_id, StakeId(1));
+        assert_eq!(stake.stake_name, "Loaded Stake 1");
+        assert_eq!(stake.parent_id, None);
+        assert_eq!(stake.complete, false);
+        assert_eq!(stake.dropped, false);
+        assert_eq!(stake.date_modified, fixed_time);
+        assert_eq!(stake.date_created, fixed_time);
+        assert_eq!(stake.note, Some("A note".to_string()));
     }
 
     #[test]
@@ -803,7 +805,7 @@ impl<'de> Deserialize<'de> for StakesCollection {
                 V: MapAccess<'de>,
             {
                 let mut next_id: Option<u32> = None;
-                let mut stakes: Option<Vec<Stake>> = None;
+                let mut stakes: Option<IndexMap<StakeId, Stake>> = None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
